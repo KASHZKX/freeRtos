@@ -65,10 +65,10 @@ __persistent keyword to be used.  See http://www.freertos.org/a00111.html#heap_4
 #define configUSE_TICK_HOOK				1
 #define configUSE_IDLE_HOOK				1
 #define configUSE_MALLOC_FAILED_HOOK	1
-#define configCHECK_FOR_STACK_OVERFLOW	2
+#define configCHECK_FOR_STACK_OVERFLOW	0
 
 /* Software timer related definitions. */
-#define configUSE_TIMERS				1
+#define configUSE_TIMERS				0
 #define configTIMER_TASK_PRIORITY		( configMAX_PRIORITIES - 1 )
 #define configTIMER_QUEUE_LENGTH		5
 #define configTIMER_TASK_STACK_DEPTH	( configMINIMAL_STACK_SIZE )
@@ -77,7 +77,7 @@ __persistent keyword to be used.  See http://www.freertos.org/a00111.html#heap_4
 #define configUSE_EVENT_GROUPS			0
 
 /* Run time stats gathering definitions. */
-#define configGENERATE_RUN_TIME_STATS	1
+#define configGENERATE_RUN_TIME_STATS	0
 #define portCONFIGURE_TIMER_FOR_RUN_TIME_STATS() vConfigureTimerForRunTimeStats()
 /* Return the current timer counter value + the overflow counter. */
 #define portGET_RUN_TIME_COUNTER_VALUE() 	( ( ( uint32_t ) TA1R ) + ulRunTimeCounterOverflows )
@@ -103,7 +103,7 @@ left at 1 with no impact on the code size. */
 #define INCLUDE_xQueueGetMutexHolder			1
 #define INCLUDE_eTaskGetState					1
 #define INCLUDE_xEventGroupSetBitsFromISR		1
-#define INCLUDE_xTimerPendFunctionCall			1
+#define INCLUDE_xTimerPendFunctionCall			0
 
 /* Include functions that format system and run-time stats into human readable
 tables. */

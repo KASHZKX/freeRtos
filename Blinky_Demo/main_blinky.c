@@ -92,7 +92,7 @@ the queue empty. */
  * Called by main when mainCREATE_SIMPLE_BLINKY_DEMO_ONLY is set to 1 in
  * main.c.
  */
-void main_blinky( void );
+void main_lab( void );
 
 /*
  * The tasks as described in the comments at the top of this file.
@@ -107,7 +107,7 @@ static QueueHandle_t xQueue = NULL;
 
 /*-----------------------------------------------------------*/
 
-void main_blinky( void )
+void main_lab( void )
 {
 	/* Create the queue. */
 	xQueue = xQueueCreate( mainQUEUE_LENGTH, sizeof( uint32_t ) );
