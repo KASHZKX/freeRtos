@@ -37,51 +37,30 @@
  * required to configure the hardware are defined in main.c.
  ******************************************************************************
  *
- * main_blinky() creates one queue, and two tasks.  It then starts the
- * scheduler.
- *
- * The Queue Send Task:
- * The queue send task is implemented by the prvQueueSendTask() function in
- * this file.  prvQueueSendTask() sits in a loop that causes it to repeatedly
- * block for 200 milliseconds, before sending the value 100 to the queue that
- * was created within main_blinky().  Once the value is sent, the task loops
- * back around to block for another 200 milliseconds...and so on.
- *
- * The Queue Receive Task:
- * The queue receive task is implemented by the prvQueueReceiveTask() function
- * in this file.  prvQueueReceiveTask() sits in a loop where it repeatedly
- * blocks on attempts to read data from the queue that was created within
- * main_blinky().  When data is received, the task checks the value of the
- * data, and if the value equals the expected 100, toggles an LED.  The 'block
- * time' parameter passed to the queue receive function specifies that the
- * task should be held in the Blocked state indefinitely to wait for data to
- * be available on the queue.  The queue receive task will only leave the
- * Blocked state when the queue send task writes to the queue.  As the queue
- * send task writes to the queue every 200 milliseconds, the queue receive
- * task leaves the Blocked state every 200 milliseconds, and therefore toggles
- * the LED every 200 milliseconds.
+ * For Lab 5 this file runs a single checkpoint test task.  The task commits a
+ * full checkpoint every ten iterations, occasionally enters LPM4.5 to simulate
+ * power failure, and then continues from the last committed CPU context after
+ * reset or power restoration.
  */
 
 /* Kernel includes. */
 #include "FreeRTOS.h"
 #include "task.h"
 #include "semphr.h"
+#include "checkpoint.h"
 
 /* Standard demo includes. */
 #include "partest.h"
 
+#include <stdio.h>
+
 /* Priorities at which the tasks are created. */
-#define mainQUEUE_RECEIVE_TASK_PRIORITY		( tskIDLE_PRIORITY + 2 )
-#define	mainQUEUE_SEND_TASK_PRIORITY		( tskIDLE_PRIORITY + 1 )
+#define mainCHECKPOINT_TASK_PRIORITY		( tskIDLE_PRIORITY + 2 )
 
-/* The rate at which data is sent to the queue.  The 200ms value is converted
-to ticks using the portTICK_PERIOD_MS constant. */
-#define mainQUEUE_SEND_FREQUENCY_MS			( pdMS_TO_TICKS( 200 ) )
-
-/* The number of items the queue can hold.  This is 1 as the receive task
-will remove items as they are added, meaning the send task should always find
-the queue empty. */
-#define mainQUEUE_LENGTH					( 1 )
+/* The task commits every ten iterations, matching the checkpoint guide. */
+#define mainCHECKPOINT_PERIOD				( 10UL )
+#define mainTASK_PERIOD_MS					( pdMS_TO_TICKS( 200 ) )
+#define mainPOWER_FAIL_MINIMUM_ITERATION	( mainCHECKPOINT_PERIOD * 2UL )
 
 /* The LED toggled by the Rx task. */
 #define mainTASK_LED						( 0 )
@@ -95,39 +74,29 @@ the queue empty. */
 void main_lab( void );
 
 /*
- * The tasks as described in the comments at the top of this file.
+ * The checkpoint task described in the comments at the top of this file.
  */
-static void prvQueueReceiveTask( void *pvParameters );
-static void prvQueueSendTask( void *pvParameters );
+static void prvCheckpointTask( void *pvParameters );
+static uint32_t prvNextPseudoRandom( uint32_t ulState );
+static BaseType_t prvShouldSimulatePowerFail( uint32_t ulIteration, uint32_t ulRandomState );
 
 /*-----------------------------------------------------------*/
 
-/* The queue used by both tasks. */
-static QueueHandle_t xQueue = NULL;
+/* Deliberately stored in .bss so the SRAM checkpoint is observable. */
+static volatile uint32_t ulCheckpointIterations;
 
 /*-----------------------------------------------------------*/
 
 void main_lab( void )
 {
-	/* Create the queue. */
-	xQueue = xQueueCreate( mainQUEUE_LENGTH, sizeof( uint32_t ) );
+	xTaskCreate( prvCheckpointTask,
+				 "CHK",
+				 configMINIMAL_STACK_SIZE,
+				 NULL,
+				 mainCHECKPOINT_TASK_PRIORITY,
+				 NULL );
 
-	if( xQueue != NULL )
-	{
-		/* Start the two tasks as described in the comments at the top of this
-		file. */
-		xTaskCreate( prvQueueReceiveTask,				/* The function that implements the task. */
-					"Rx", 								/* The text name assigned to the task - for debug only as it is not used by the kernel. */
-					configMINIMAL_STACK_SIZE, 			/* The size of the stack to allocate to the task. */
-					NULL, 								/* The parameter passed to the task - not used in this case. */
-					mainQUEUE_RECEIVE_TASK_PRIORITY, 	/* The priority assigned to the task. */
-					NULL );								/* The task handle is not required, so NULL is passed. */
-
-		xTaskCreate( prvQueueSendTask, "TX", configMINIMAL_STACK_SIZE, NULL, mainQUEUE_SEND_TASK_PRIORITY, NULL );
-
-		/* Start the tasks and timer running. */
-		vTaskStartScheduler();
-	}
+	vTaskStartScheduler();
 
 	/* If all is well, the scheduler will now be running, and the following
 	line will never be reached.  If the following line does execute, then
@@ -139,10 +108,11 @@ void main_lab( void )
 }
 /*-----------------------------------------------------------*/
 
-static void prvQueueSendTask( void *pvParameters )
+static void prvCheckpointTask( void *pvParameters )
 {
 TickType_t xNextWakeTime;
-const unsigned long ulValueToSend = 100UL;
+uint32_t ulIteration = ulCheckpointIterations;
+uint32_t ulRandomState = 0xA5A55A5AUL ^ FreeRTOSLab_GetCheckpointSequence();
 
 	/* Remove compiler warning about unused parameter. */
 	( void ) pvParameters;
@@ -152,41 +122,53 @@ const unsigned long ulValueToSend = 100UL;
 
 	for( ;; )
 	{
-		/* Place this task in the blocked state until it is time to run again. */
-		vTaskDelayUntil( &xNextWakeTime, mainQUEUE_SEND_FREQUENCY_MS );
+		vTaskDelayUntil( &xNextWakeTime, mainTASK_PERIOD_MS );
 
-		/* Send to the queue - causing the queue receive task to unblock and
-		toggle the LED.  0 is used as the block time so the sending operation
-		will not block - it shouldn't need to block as the queue should always
-		be empty at this point in the code. */
-		xQueueSend( xQueue, &ulValueToSend, 0U );
+		ulIteration++;
+		ulCheckpointIterations = ulIteration;
+		ulRandomState = prvNextPseudoRandom( ulRandomState + ulIteration );
+
+		if( ( ulIteration % mainCHECKPOINT_PERIOD ) == 0UL )
+		{
+			vParTestToggleLED( mainTASK_LED );
+			FreeRTOSLab_CheckpointCommit();
+		}
+
+		printf( "checkpoint i=%u seq=%u\r\n",
+				( unsigned int ) ulIteration,
+				( unsigned int ) FreeRTOSLab_GetCheckpointSequence() );
+
+		if( prvShouldSimulatePowerFail( ulIteration, ulRandomState ) != pdFALSE )
+		{
+			FreeRTOSLab_RequestPowerFail();
+		}
 	}
 }
 /*-----------------------------------------------------------*/
 
-static void prvQueueReceiveTask( void *pvParameters )
+static uint32_t prvNextPseudoRandom( uint32_t ulState )
 {
-unsigned long ulReceivedValue;
-const unsigned long ulExpectedValue = 100UL;
+	ulState ^= ulState << 13;
+	ulState ^= ulState >> 17;
+	ulState ^= ulState << 5;
 
-	/* Remove compiler warning about unused parameter. */
-	( void ) pvParameters;
+	return ulState;
+}
+/*-----------------------------------------------------------*/
 
-	for( ;; )
+static BaseType_t prvShouldSimulatePowerFail( uint32_t ulIteration, uint32_t ulRandomState )
+{
+	if( ulIteration < mainPOWER_FAIL_MINIMUM_ITERATION )
 	{
-		/* Wait until something arrives in the queue - this task will block
-		indefinitely provided INCLUDE_vTaskSuspend is set to 1 in
-		FreeRTOSConfig.h. */
-		xQueueReceive( xQueue, &ulReceivedValue, portMAX_DELAY );
-
-		/*  To get here something must have been received from the queue, but
-		is it the expected value?  If it is, toggle the LED. */
-		if( ulReceivedValue == ulExpectedValue )
-		{
-			vParTestToggleLED( mainTASK_LED );
-			ulReceivedValue = 0U;
-		}
+		return pdFALSE;
 	}
+
+	if( ( ulIteration % mainCHECKPOINT_PERIOD ) == 0UL )
+	{
+		return pdFALSE;
+	}
+
+	return ( ( ulRandomState & 0x1FU ) == 0U ) ? pdTRUE : pdFALSE;
 }
 /*-----------------------------------------------------------*/
 

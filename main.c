@@ -46,6 +46,7 @@
 #include "FreeRTOS.h"
 #include "task.h"
 #include "semphr.h"
+#include "checkpoint.h"
 
 /* Standard demo includes, used so the tick hook can exercise some FreeRTOS
 functionality in an interrupt. */
@@ -55,6 +56,10 @@ functionality in an interrupt. */
 
 /* TI includes. */
 #include "driverlib.h"
+
+#include <setjmp.h>
+#include <stddef.h>
+#include <stdint.h>
 
 /* Set mainCREATE_SIMPLE_BLINKY_DEMO_ONLY to one to run the simple blinky demo,
 or 0 to run the more comprehensive test and demo application. */
@@ -66,6 +71,13 @@ or 0 to run the more comprehensive test and demo application. */
  * Configure the hardware as necessary to run this demo.
  */
 static void prvSetupHardware( void );
+static void prvCheckpointCopy( volatile uint8_t *pucDestination, const volatile uint8_t *pucSource, size_t xLength );
+static uint32_t prvCheckpointChecksumBytes( const volatile uint8_t *pucData, size_t xLength, uint32_t ulSeed );
+static uint16_t prvCheckpointSramOffset( void );
+static uint16_t prvCheckpointSramSize( void );
+static uint8_t prvCheckpointFindBestSlot( void );
+static int prvCheckpointSlotIsValid( uint8_t ucSlot );
+static uint32_t prvCheckpointCalculateSlotChecksum( uint8_t ucSlot );
 
 /*
  * main_blinky() is used when mainCREATE_SIMPLE_BLINKY_DEMO_ONLY is set to 1.
@@ -83,6 +95,12 @@ void vApplicationMallocFailedHook( void );
 void vApplicationIdleHook( void );
 void vApplicationStackOverflowHook( TaskHandle_t pxTask, char *pcTaskName );
 void vApplicationTickHook( void );
+void vApplicationSetupTimerInterrupt( void );
+
+extern uint8_t __checkpoint_bss_start;
+extern uint8_t __checkpoint_bss_end;
+extern uint8_t __checkpoint_data_start;
+extern uint8_t __checkpoint_data_end;
 
 /* The heap is allocated here so the "persistent" qualifier can be used.  This
 requires configAPPLICATION_ALLOCATED_HEAP to be set to 1 in FreeRTOSConfig.h.
@@ -96,12 +114,70 @@ uint8_t ucHeap[ configTOTAL_HEAP_SIZE ] = { 0 };
 
 /*-----------------------------------------------------------*/
 
+#define checkpointNUM_SLOTS              ( 2U )
+#define checkpointMAGIC                  ( 0x43504B54UL )
+#define checkpointCOMMITTED              ( 0x544B5043UL )
+#define checkpointINVALID_SLOT           ( 0xFFU )
+#define checkpointFR5994_RAM_START       ( 0x1C00U )
+#define checkpointFR5994_RAM_SIZE        ( 0x1000U )
+#define checkpointFR5969_RAM_SIZE        ( 0x0800U )
+
+#if defined( __MSP430FR5994__ )
+	#define checkpointSRAM_BASE          checkpointFR5994_RAM_START
+	#define checkpointSRAM_BACKUP_SIZE   checkpointFR5994_RAM_SIZE
+#elif defined( __MSP430FR5969__ )
+	#define checkpointSRAM_BASE          checkpointFR5994_RAM_START
+	#define checkpointSRAM_BACKUP_SIZE   checkpointFR5969_RAM_SIZE
+#else
+	#define checkpointSRAM_BASE          checkpointFR5994_RAM_START
+	#define checkpointSRAM_BACKUP_SIZE   checkpointFR5994_RAM_SIZE
+#endif
+
+typedef struct CheckpointCpuContext
+{
+	jmp_buf xEnvironment;
+} CheckpointCpuContext_t;
+
+typedef struct CheckpointSlot
+{
+	uint32_t ulMagic;
+	uint32_t ulCommitted;
+	uint32_t ulSequence;
+	uint32_t ulChecksum;
+	uint16_t usSramOffset;
+	uint16_t usSramSize;
+	uint16_t usHeapSize;
+	CheckpointCpuContext_t xCpuContext;
+	uint8_t ucHeapCopy[ configTOTAL_HEAP_SIZE ];
+	uint8_t ucSramCopy[ checkpointSRAM_BACKUP_SIZE ];
+} CheckpointSlot_t;
+
+typedef struct CheckpointMeta
+{
+	uint32_t ulMagic;
+	uint32_t ulSequence;
+	uint8_t ucActiveSlot;
+	uint8_t ucRestoreRequested;
+} CheckpointMeta_t;
+
+#if defined( __TI_COMPILER_VERSION__ )
+	#pragma DATA_SECTION( xCheckpointSlots, ".checkpoint_backup" )
+	#pragma RETAIN( xCheckpointSlots )
+	#pragma DATA_SECTION( xCheckpointMeta, ".checkpoint_meta" )
+	#pragma RETAIN( xCheckpointMeta )
+#endif
+static CheckpointSlot_t xCheckpointSlots[ checkpointNUM_SLOTS ];
+static CheckpointMeta_t xCheckpointMeta;
+
 int main( void )
 {
 	/* See http://www.FreeRTOS.org/MSP430FR5969_Free_RTOS_Demo.html */
 
 	/* Configure the hardware ready to run the demo. */
 	prvSetupHardware();
+
+	/* Restore the most recent complete FRAM checkpoint, when one exists. */
+	FreeRTOSLab_CheckpointRestore();
 
 	/* The mainCREATE_SIMPLE_BLINKY_DEMO_ONLY setting is described at the top
 	of this file. */
@@ -116,6 +192,241 @@ int main( void )
 	#endif
 
 	return 0;
+}
+/*-----------------------------------------------------------*/
+
+void FreeRTOSLab_CheckpointCommit( void )
+{
+uint8_t ucNextSlot;
+volatile int iSetjmpResult;
+
+	taskDISABLE_INTERRUPTS();
+
+	if( xCheckpointMeta.ulMagic != checkpointMAGIC )
+	{
+		xCheckpointMeta.ulMagic = checkpointMAGIC;
+		xCheckpointMeta.ulSequence = 0UL;
+		xCheckpointMeta.ucActiveSlot = checkpointINVALID_SLOT;
+		xCheckpointMeta.ucRestoreRequested = 0U;
+	}
+
+	ucNextSlot = ( xCheckpointMeta.ucActiveSlot == 0U ) ? 1U : 0U;
+	xCheckpointSlots[ ucNextSlot ].ulMagic = checkpointMAGIC;
+	xCheckpointSlots[ ucNextSlot ].ulCommitted = 0UL;
+	xCheckpointSlots[ ucNextSlot ].ulSequence = xCheckpointMeta.ulSequence + 1UL;
+	xCheckpointSlots[ ucNextSlot ].usHeapSize = ( uint16_t ) configTOTAL_HEAP_SIZE;
+	xCheckpointSlots[ ucNextSlot ].usSramOffset = prvCheckpointSramOffset();
+	xCheckpointSlots[ ucNextSlot ].usSramSize = prvCheckpointSramSize();
+
+	prvCheckpointCopy( xCheckpointSlots[ ucNextSlot ].ucHeapCopy, ucHeap, configTOTAL_HEAP_SIZE );
+	prvCheckpointCopy( xCheckpointSlots[ ucNextSlot ].ucSramCopy,
+					   ( const volatile uint8_t * ) ( ( uintptr_t ) checkpointSRAM_BASE + xCheckpointSlots[ ucNextSlot ].usSramOffset ),
+					   xCheckpointSlots[ ucNextSlot ].usSramSize );
+
+	iSetjmpResult = setjmp( xCheckpointSlots[ ucNextSlot ].xCpuContext.xEnvironment );
+
+	if( iSetjmpResult == 0 )
+	{
+		xCheckpointSlots[ ucNextSlot ].ulChecksum = prvCheckpointCalculateSlotChecksum( ucNextSlot );
+		xCheckpointSlots[ ucNextSlot ].ulCommitted = checkpointCOMMITTED;
+		xCheckpointMeta.ulSequence = xCheckpointSlots[ ucNextSlot ].ulSequence;
+		xCheckpointMeta.ucActiveSlot = ucNextSlot;
+		xCheckpointMeta.ucRestoreRequested = 0U;
+
+		taskENABLE_INTERRUPTS();
+	}
+	else
+	{
+		xCheckpointMeta.ucRestoreRequested = 0U;
+		taskENABLE_INTERRUPTS();
+	}
+}
+/*-----------------------------------------------------------*/
+
+void FreeRTOSLab_CheckpointRestore( void )
+{
+uint8_t ucSlot;
+
+	ucSlot = prvCheckpointFindBestSlot();
+
+	if( ucSlot == checkpointINVALID_SLOT )
+	{
+		return;
+	}
+
+	prvCheckpointCopy( ucHeap, xCheckpointSlots[ ucSlot ].ucHeapCopy, configTOTAL_HEAP_SIZE );
+	prvCheckpointCopy( ( volatile uint8_t * ) ( ( uintptr_t ) checkpointSRAM_BASE + xCheckpointSlots[ ucSlot ].usSramOffset ),
+					   xCheckpointSlots[ ucSlot ].ucSramCopy,
+					   xCheckpointSlots[ ucSlot ].usSramSize );
+
+	/* main() is bypassed by longjmp, so re-arm the FreeRTOS tick first. */
+	vApplicationSetupTimerInterrupt();
+	longjmp( xCheckpointSlots[ ucSlot ].xCpuContext.xEnvironment, 1 );
+}
+/*-----------------------------------------------------------*/
+
+void FreeRTOSLab_RequestPowerFail( void )
+{
+	xCheckpointMeta.ucRestoreRequested = 1U;
+	PMM_turnOffRegulator();
+	__bis_SR_register( LPM4_bits | GIE );
+
+	for( ;; )
+	{
+		__no_operation();
+	}
+}
+/*-----------------------------------------------------------*/
+
+uint32_t FreeRTOSLab_GetCheckpointSequence( void )
+{
+	if( xCheckpointMeta.ulMagic != checkpointMAGIC )
+	{
+		return 0UL;
+	}
+
+	return xCheckpointMeta.ulSequence;
+}
+/*-----------------------------------------------------------*/
+
+static uint8_t prvCheckpointFindBestSlot( void )
+{
+uint8_t ucBestSlot = checkpointINVALID_SLOT;
+uint8_t ucSlot;
+
+	if( xCheckpointMeta.ulMagic == checkpointMAGIC )
+	{
+		if( ( xCheckpointMeta.ucActiveSlot < checkpointNUM_SLOTS ) &&
+			( prvCheckpointSlotIsValid( xCheckpointMeta.ucActiveSlot ) != 0 ) )
+		{
+			ucBestSlot = xCheckpointMeta.ucActiveSlot;
+		}
+	}
+
+	for( ucSlot = 0U; ucSlot < checkpointNUM_SLOTS; ucSlot++ )
+	{
+		if( prvCheckpointSlotIsValid( ucSlot ) != 0 )
+		{
+			if( ( ucBestSlot == checkpointINVALID_SLOT ) ||
+				( xCheckpointSlots[ ucSlot ].ulSequence > xCheckpointSlots[ ucBestSlot ].ulSequence ) )
+			{
+				ucBestSlot = ucSlot;
+			}
+		}
+	}
+
+	return ucBestSlot;
+}
+/*-----------------------------------------------------------*/
+
+static int prvCheckpointSlotIsValid( uint8_t ucSlot )
+{
+	if( ucSlot >= checkpointNUM_SLOTS )
+	{
+		return 0;
+	}
+
+	if( xCheckpointSlots[ ucSlot ].ulMagic != checkpointMAGIC )
+	{
+		return 0;
+	}
+
+	if( xCheckpointSlots[ ucSlot ].ulCommitted != checkpointCOMMITTED )
+	{
+		return 0;
+	}
+
+	if( xCheckpointSlots[ ucSlot ].usHeapSize != ( uint16_t ) configTOTAL_HEAP_SIZE )
+	{
+		return 0;
+	}
+
+	if( xCheckpointSlots[ ucSlot ].usSramSize > checkpointSRAM_BACKUP_SIZE )
+	{
+		return 0;
+	}
+
+	return xCheckpointSlots[ ucSlot ].ulChecksum == prvCheckpointCalculateSlotChecksum( ucSlot );
+}
+/*-----------------------------------------------------------*/
+
+static uint32_t prvCheckpointCalculateSlotChecksum( uint8_t ucSlot )
+{
+uint32_t ulChecksum = 2166136261UL;
+
+	ulChecksum = prvCheckpointChecksumBytes( xCheckpointSlots[ ucSlot ].ucHeapCopy,
+											 xCheckpointSlots[ ucSlot ].usHeapSize,
+											 ulChecksum );
+	ulChecksum = prvCheckpointChecksumBytes( xCheckpointSlots[ ucSlot ].ucSramCopy,
+											 xCheckpointSlots[ ucSlot ].usSramSize,
+											 ulChecksum );
+	ulChecksum = prvCheckpointChecksumBytes( ( const volatile uint8_t * ) &( xCheckpointSlots[ ucSlot ].xCpuContext ),
+											 sizeof( xCheckpointSlots[ ucSlot ].xCpuContext ),
+											 ulChecksum );
+	ulChecksum ^= xCheckpointSlots[ ucSlot ].ulSequence;
+	ulChecksum *= 16777619UL;
+
+	return ulChecksum;
+}
+/*-----------------------------------------------------------*/
+
+static void prvCheckpointCopy( volatile uint8_t *pucDestination, const volatile uint8_t *pucSource, size_t xLength )
+{
+	while( xLength > 0U )
+	{
+		*pucDestination = *pucSource;
+		pucDestination++;
+		pucSource++;
+		xLength--;
+	}
+}
+/*-----------------------------------------------------------*/
+
+static uint32_t prvCheckpointChecksumBytes( const volatile uint8_t *pucData, size_t xLength, uint32_t ulSeed )
+{
+	while( xLength > 0U )
+	{
+		ulSeed ^= ( uint32_t ) *pucData;
+		ulSeed *= 16777619UL;
+		pucData++;
+		xLength--;
+	}
+
+	return ulSeed;
+}
+/*-----------------------------------------------------------*/
+
+static uint16_t prvCheckpointSramOffset( void )
+{
+uintptr_t uxBssStart = ( uintptr_t ) &__checkpoint_bss_start;
+uintptr_t uxDataStart = ( uintptr_t ) &__checkpoint_data_start;
+uintptr_t uxStart = ( uxBssStart < uxDataStart ) ? uxBssStart : uxDataStart;
+
+	return ( uint16_t ) ( uxStart - ( uintptr_t ) checkpointSRAM_BASE );
+}
+/*-----------------------------------------------------------*/
+
+static uint16_t prvCheckpointSramSize( void )
+{
+uintptr_t uxBssStart = ( uintptr_t ) &__checkpoint_bss_start;
+uintptr_t uxBssEnd = ( uintptr_t ) &__checkpoint_bss_end;
+uintptr_t uxDataStart = ( uintptr_t ) &__checkpoint_data_start;
+uintptr_t uxDataEnd = ( uintptr_t ) &__checkpoint_data_end;
+uintptr_t uxStart = ( uxBssStart < uxDataStart ) ? uxBssStart : uxDataStart;
+uintptr_t uxEnd = ( uxBssEnd > uxDataEnd ) ? uxBssEnd : uxDataEnd;
+uintptr_t uxMaxEnd = ( uintptr_t ) checkpointSRAM_BASE + checkpointSRAM_BACKUP_SIZE;
+
+	if( uxEnd > uxMaxEnd )
+	{
+		uxEnd = uxMaxEnd;
+	}
+
+	if( uxEnd <= uxStart )
+	{
+		return 0U;
+	}
+
+	return ( uint16_t ) ( uxEnd - uxStart );
 }
 /*-----------------------------------------------------------*/
 

@@ -171,10 +171,15 @@ SECTIONS
        .jtagpassword   : {}                 /* JTAG Password                     */
     } > IPESIGNATURE
 
-    .bss        : {} > RAM                  /* Global & static vars              */
-    .data       : {} > RAM                  /* Global & static vars              */
+    .bss        : {} RUN_START(__checkpoint_bss_start) RUN_END(__checkpoint_bss_end) > RAM
+                                             /* Global & static vars              */
+    .data       : {} RUN_START(__checkpoint_data_start) RUN_END(__checkpoint_data_end) > RAM
+                                             /* Global & static vars              */
     .TI.noinit  : {} > RAM                  /* For #pragma noinit                */
     .stack      : {} > RAM (HIGH)           /* Software system stack             */
+
+    .checkpoint_meta   : type = NOINIT { *(.checkpoint_meta) } > FRAM
+    .checkpoint_backup : type = NOINIT { *(.checkpoint_backup) } > FRAM
 
     .infoA     : {} > INFOA              /* MSP430 INFO FRAM  Memory segments */
     .infoB     : {} > INFOB
