@@ -50,7 +50,11 @@
 
 /* Standard demo includes. */
 #include "partest.h"
+#define mainUSE_CIO_PRINTF     0
+
+#if( mainUSE_CIO_PRINTF == 1 )
 #include <stdio.h>
+#endif
 
 /* Priorities at which the tasks are created. */
 #define mainCHECKPOINT_TASK_PRIORITY		( tskIDLE_PRIORITY + 1 )
@@ -121,7 +125,9 @@ unsigned long ulCheckpointIterations = 0UL;
 
 		if(prvRandom(ulCheckpointIterations)) checkpointPowerOff(); // Todo: enter LPM4.5
 		if(ulCheckpointIterations % mainCHECKPOINT_PERIOD == 0) checkpointCommit();
+		#if( mainUSE_CIO_PRINTF == 1 )
 		printf("%d\n", (int)ulCheckpointIterations);
+		#endif
 	}
 }
 /*-----------------------------------------------------------*/

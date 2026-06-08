@@ -166,6 +166,7 @@ void checkpointRestore(){
     memcpy(CKPT_UCHEAP_ADDR, g_backupUcHeap[idx], CKPT_UCHEAP_SIZE);
 	
 	size_t sramSize = (size_t)(&__sram_end - &__sram_start);
+	configASSERT(sramSize <= CKPT_SRAM_MAX_SIZE);
 	if(sramSize <= CKPT_SRAM_MAX_SIZE){
 		memcpy(&__sram_start, g_backupSram[idx], sramSize);
 	}
@@ -191,6 +192,7 @@ void checkpointCommit(){
     memcpy(g_backupUcHeap[next], ucHeap, CKPT_UCHEAP_SIZE);
 
 	size_t sramSize = (size_t)(&__sram_end - &__sram_start);
+	configASSERT(sramSize <= CKPT_SRAM_MAX_SIZE);
 	if(sramSize <= CKPT_SRAM_MAX_SIZE){
 		memcpy(g_backupSram[next], &__sram_start, sramSize);
 	}
