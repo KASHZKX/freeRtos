@@ -47,6 +47,9 @@
 #include "task.h"
 #include "semphr.h"
 
+/* checkpoint include files*/
+#include "checkpoint.h"
+
 /* Standard demo includes, used so the tick hook can exercise some FreeRTOS
 functionality in an interrupt. */
 #include "EventGroupsDemo.h"
@@ -96,6 +99,32 @@ uint8_t ucHeap[ configTOTAL_HEAP_SIZE ] = { 0 };
 
 /*-----------------------------------------------------------*/
 
+#define CKPT_UCHEAP_ADDR   ((uint8_t *)0x4000)
+#define CKPT_UCHEAP_SIZE   (0x3800)
+
+#define CKPT_SRAM_ADDR     ((uint8_t *)0x1C00)
+#define CKPT_SRAM_SIZE     0x02BC
+
+#define CKPT_MAGIC         0xCAFE
+
+#pragma PERSISTENT(g_ckptMagic)
+uint16_t g_ckptMagic = 0;
+
+#pragma PERSISTENT(g_validIndex)
+uint8_t g_validIndex = 0;
+
+/* ping-pong backup */
+#pragma PERSISTENT(g_backupUcHeap)
+uint8_t g_backupUcHeap[2][CKPT_UCHEAP_SIZE] = {0};
+
+#pragma PERSISTENT(g_backupSram)
+uint8_t g_backupSram[2][CKPT_SRAM_SIZE] = {0};
+
+#pragma PERSISTENT(g_backupRegs)
+uint16_t g_backupRegs[2][16] = {0};
+
+/*-----------------------------------------------------------*/
+
 int main( void )
 {
 	/* See http://www.FreeRTOS.org/MSP430FR5969_Free_RTOS_Demo.html */
@@ -121,7 +150,21 @@ int main( void )
 /*-----------------------------------------------------------*/
 
 void checkpointCommit(){
-	return;
+    uint8_t next;
+
+    __disable_interrupt();
+
+    next = g_validIndex ^ 1;
+
+    memcpy(g_backupUcHeap[next], CKPT_UCHEAP_ADDR, CKPT_UCHEAP_SIZE);
+    memcpy(g_backupSram[next],   CKPT_SRAM_ADDR,   CKPT_SRAM_SIZE);
+
+    checkpointBackupReg(g_backupRegs[next]);
+
+    g_ckptMagic = CKPT_MAGIC;
+    g_validIndex = next;   /* 一定要最後才切換 */
+
+    __enable_interrupt();
 }
 
 void checkpointPowerOff(){

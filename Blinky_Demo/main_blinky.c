@@ -47,7 +47,6 @@
 #include "FreeRTOS.h"
 #include "task.h"
 #include "semphr.h"
-#include "checkpoint.h"
 
 /* Standard demo includes. */
 #include "partest.h"
