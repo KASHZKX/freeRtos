@@ -3,9 +3,12 @@
     .ref g_backupRegs
     .global checkpointBackupReg0
     .global checkpointBackupReg1
+    .global checkpointRestoreReg0
+    .global checkpointRestoreReg1
     .def checkpointBackupReg0
     .def checkpointBackupReg1
-
+    .def checkpointRestoreReg0
+    .def checkpointRestoreReg1
     .if $DEFINED( __LARGE_CODE_MODEL__ )
         .define "reta", ret_addr
     .else
@@ -54,6 +57,54 @@ checkpointBackupReg1: .asmfunc
     movx.a r13,  g_backupRegs + 64 + 52
     movx.a r14,  g_backupRegs + 64 + 56
     movx.a r15,  g_backupRegs + 64 + 60
+
+    ret_addr
+    .endasmfunc
+
+checkpointRestoreReg0: .asmfunc
+    dint
+    nop
+
+    movx.a &g_backupRegs + 16, r4
+    movx.a &g_backupRegs + 20, r5
+    movx.a &g_backupRegs + 24, r6
+    movx.a &g_backupRegs + 28, r7
+    movx.a &g_backupRegs + 32, r8
+    movx.a &g_backupRegs + 36, r9
+    movx.a &g_backupRegs + 40, r10
+    movx.a &g_backupRegs + 44, r11
+    movx.a &g_backupRegs + 48, r12
+    movx.a &g_backupRegs + 52, r13
+    movx.a &g_backupRegs + 56, r14
+    movx.a &g_backupRegs + 60, r15
+
+    movx.a &g_backupRegs + 12, r3
+    movx.a &g_backupRegs + 8,  r2
+    movx.a &g_backupRegs + 4,  r1
+
+    ret_addr
+    .endasmfunc
+
+checkpointRestoreReg1: .asmfunc
+    dint
+    nop
+
+    movx.a &g_backupRegs + 64 + 16, r4
+    movx.a &g_backupRegs + 64 + 20, r5
+    movx.a &g_backupRegs + 64 + 24, r6
+    movx.a &g_backupRegs + 64 + 28, r7
+    movx.a &g_backupRegs + 64 + 32, r8
+    movx.a &g_backupRegs + 64 + 36, r9
+    movx.a &g_backupRegs + 64 + 40, r10
+    movx.a &g_backupRegs + 64 + 44, r11
+    movx.a &g_backupRegs + 64 + 48, r12
+    movx.a &g_backupRegs + 64 + 52, r13
+    movx.a &g_backupRegs + 64 + 56, r14
+    movx.a &g_backupRegs + 64 + 60, r15
+
+    movx.a &g_backupRegs + 64 + 12, r3
+    movx.a &g_backupRegs + 64 + 8,  r2
+    movx.a &g_backupRegs + 64 + 4,  r1
 
     ret_addr
     .endasmfunc

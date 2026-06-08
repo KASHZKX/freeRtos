@@ -134,7 +134,7 @@ int main( void )
 
 	/* Configure the hardware ready to run the demo. */
 	prvSetupHardware();
-
+	checkpointRestore();
 	/* The mainCREATE_SIMPLE_BLINKY_DEMO_ONLY setting is described at the top
 	of this file. */
 	#if( mainCREATE_SIMPLE_BLINKY_DEMO_ONLY == 1 )
@@ -148,6 +148,35 @@ int main( void )
 	#endif
 
 	return 0;
+}
+
+/*-----------------------------------------------------------*/
+
+void checkpointRestore(){
+    uint8_t idx;
+
+    if (g_ckptMagic != CKPT_MAGIC) {
+        return;                 // 第一次開機，不 restore
+    }
+
+    __disable_interrupt();
+
+    idx = g_validIndex;
+
+    memcpy(CKPT_UCHEAP_ADDR, g_backupUcHeap[idx], CKPT_UCHEAP_SIZE);
+	
+	size_t sramSize = (size_t)(&__sram_end - &__sram_start);
+	if(sramSize <= CKPT_SRAM_MAX_SIZE){
+		memcpy(&__sram_start, g_backupSram[idx], sramSize);
+	}
+
+    if (idx == 0)
+        checkpointRestoreReg0();
+    else
+        checkpointRestoreReg1();
+      
+	// This should not be executed
+    __enable_interrupt();	
 }
 
 /*-----------------------------------------------------------*/
