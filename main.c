@@ -117,6 +117,17 @@ int main( void )
 
 	return 0;
 }
+
+/*-----------------------------------------------------------*/
+
+void checkpointCommit(){
+	return;
+}
+
+void checkpointPowerOff(){
+	return;
+}
+
 /*-----------------------------------------------------------*/
 
 void vApplicationMallocFailedHook( void )

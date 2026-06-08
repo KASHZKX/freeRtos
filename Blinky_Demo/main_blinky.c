@@ -69,10 +69,8 @@ void main_lab( void );
 /*
  * The tasks as described in the comments at the top of this file.
  */
-static void prvCheckPointTask( void *pvParameters );
-static void prvRandom( void *pvParameters );
-static void prvPowerOff( void *pvParameters );
-static void prvCommit( void *pvParameters );
+static void prvCheckpointTask( void *pvParameters );
+static BaseType_t prvRandom( const unsigned long ulCheckpointIterations );
 
 /*-----------------------------------------------------------*/
 
@@ -108,7 +106,7 @@ void main_lab( void )
 static void prvCheckpointTask( void *pvParameters )
 {
 TickType_t xNextWakeTime;
-const unsigned long ulValueToSend = 100UL;
+unsigned long ulCheckpointIterations = 0UL;
 
 	/* Remove compiler warning about unused parameter. */
 	( void ) pvParameters;
@@ -116,30 +114,23 @@ const unsigned long ulValueToSend = 100UL;
 	/* Initialise xNextWakeTime - this only needs to be done once. */
 	xNextWakeTime = xTaskGetTickCount();
 
-	while(ulCheckpointIterations++;)
+	for( ;; )
 	{
+	    ulCheckpointIterations++;
 		/* Place this task in the blocked state until it is time to run again. */
 		vTaskDelayUntil( &xNextWakeTime,  mainCHECKPOINT_DELAY );
 
-		if(prvRandom()) prvPowerOff(); // Todo: enter LPM4.5
-		if(ulCheckpointIterations % mainCHECKPOINT_PERIOD == 0) prvCommit();
-		printf("%lu\n", i);
+		if(prvRandom(ulCheckpointIterations)) checkpointPowerOff(); // Todo: enter LPM4.5
+		if(ulCheckpointIterations % mainCHECKPOINT_PERIOD == 0) checkpointCommit();
+		printf("%d\n", (int)ulCheckpointIterations);
 	}
 }
 /*-----------------------------------------------------------*/
 
-static BaseType_t prvRandom( void *pvParameters)
+static BaseType_t prvRandom( const unsigned long ulCheckpointIterations )
 {
-	( void ) pvParameters;
 	if(ulCheckpointIterations % 24 == 0) return pdTRUE;
 	return pdFALSE;
 }
 
 /*-----------------------------------------------------------*/
-
-static void prvCommit( void *pvParameters)
-{
-	( void ) pvParameters;
-
-	
-}
