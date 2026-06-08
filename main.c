@@ -46,6 +46,7 @@
 #include "FreeRTOS.h"
 #include "task.h"
 #include "semphr.h"
+#include <string.h>
 
 /* checkpoint include files*/
 #include "checkpoint.h"
@@ -87,6 +88,8 @@ void vApplicationIdleHook( void );
 void vApplicationStackOverflowHook( TaskHandle_t pxTask, char *pcTaskName );
 void vApplicationTickHook( void );
 
+extern uint8_t __sram_start, __sram_end;
+
 /* The heap is allocated here so the "persistent" qualifier can be used.  This
 requires configAPPLICATION_ALLOCATED_HEAP to be set to 1 in FreeRTOSConfig.h.
 See http://www.freertos.org/a00111.html for more information. */
@@ -99,11 +102,11 @@ uint8_t ucHeap[ configTOTAL_HEAP_SIZE ] = { 0 };
 
 /*-----------------------------------------------------------*/
 
-#define CKPT_UCHEAP_ADDR   ((uint8_t *)0x4000)
-#define CKPT_UCHEAP_SIZE   (0x3800)
+#define CKPT_UCHEAP_ADDR   ((uint8_t *)ucHeap)
+#define CKPT_UCHEAP_SIZE   (configTOTAL_HEAP_SIZE)
 
-#define CKPT_SRAM_ADDR     ((uint8_t *)0x1C00)
-#define CKPT_SRAM_SIZE     0x02BC
+#define CKPT_SRAM_ADDR  ((uint8_t *)&__sram_start)
+#define CKPT_SRAM_MAX_SIZE  (0x0500)
 
 #define CKPT_MAGIC         0xCAFE
 
@@ -113,15 +116,15 @@ uint16_t g_ckptMagic = 0;
 #pragma PERSISTENT(g_validIndex)
 uint8_t g_validIndex = 0;
 
+#pragma PERSISTENT(g_backupRegs)
+uint32_t g_backupRegs[2][16] = {0};
+
 /* ping-pong backup */
 #pragma PERSISTENT(g_backupUcHeap)
 uint8_t g_backupUcHeap[2][CKPT_UCHEAP_SIZE] = {0};
 
 #pragma PERSISTENT(g_backupSram)
-uint8_t g_backupSram[2][CKPT_SRAM_SIZE] = {0};
-
-#pragma PERSISTENT(g_backupRegs)
-uint16_t g_backupRegs[2][16] = {0};
+uint8_t g_backupSram[2][CKPT_SRAM_MAX_SIZE] = {0};
 
 /*-----------------------------------------------------------*/
 
@@ -155,11 +158,18 @@ void checkpointCommit(){
     __disable_interrupt();
 
     next = g_validIndex ^ 1;
+	
+    memcpy(g_backupUcHeap[next], ucHeap, CKPT_UCHEAP_SIZE);
 
-    memcpy(g_backupUcHeap[next], CKPT_UCHEAP_ADDR, CKPT_UCHEAP_SIZE);
-    memcpy(g_backupSram[next],   CKPT_SRAM_ADDR,   CKPT_SRAM_SIZE);
+	size_t sramSize = (size_t)(&__sram_end - &__sram_start);
+	if(sramSize <= CKPT_SRAM_MAX_SIZE){
+		memcpy(g_backupSram[next], &__sram_start, sramSize);
+	}
 
-    checkpointBackupReg(g_backupRegs[next]);
+    if (next == 0)
+        checkpointBackupReg0();
+    else
+        checkpointBackupReg1();
 
     g_ckptMagic = CKPT_MAGIC;
     g_validIndex = next;   /* 一定要最後才切換 */

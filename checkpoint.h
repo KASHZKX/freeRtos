@@ -10,6 +10,7 @@
 
 void checkpointCommit( void );
 void checkpointPowerOff( void );
-extern void checkpointBackupReg(uint16_t *buf);
+extern void checkpointBackupReg0(void);
+extern void checkpointBackupReg1(void);
 
 #endif /* FREERTOS_LAB5_CHECKPOINT_H */

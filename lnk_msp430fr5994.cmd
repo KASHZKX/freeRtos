@@ -205,8 +205,12 @@ SECTIONS
         .jtagpassword       : {}            /* JTAG Password                     */
     } > IPESIGNATURE
 
-    .bss        : {} > RAM                  /* Global & static vars              */
-    .data       : {} > RAM                  /* Global & static vars              */
+    GROUP(RAM_BACKUP)                       /* Global & static vars              */
+    {
+        .bss  : {}      /* Global & static zero-init vars */
+        .data : {}      /* Global & static initialized vars */
+    } > RAM, RUN_START(__sram_start) RUN_END(__sram_end)
+                                             
     .TI.noinit  : {} > RAM                  /* For #pragma noinit                */
     .stack      : {} > RAM (HIGH)           /* Software system stack             */
 
