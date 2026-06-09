@@ -9,7 +9,7 @@
 
 void checkpointRestore( void );
 void checkpointCommit( void );
-void checkpointPowerOff( void );
+extern void checkpointPowerOff( void );
 extern void checkpointRestoreReg0(void);
 extern void checkpointRestoreReg1(void);
 extern void checkpointBackupReg0(void);

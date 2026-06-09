@@ -50,7 +50,7 @@
 
 /* Standard demo includes. */
 #include "partest.h"
-#define mainUSE_CIO_PRINTF     0
+#define mainUSE_CIO_PRINTF     1
 
 #if( mainUSE_CIO_PRINTF == 1 )
 #include <stdio.h>
@@ -73,12 +73,12 @@ void main_lab( void );
  * The tasks as described in the comments at the top of this file.
  */
 static void prvCheckpointTask( void *pvParameters );
-static BaseType_t prvRandom( const unsigned long ulCheckpointIterations );
+static BaseType_t prvRandom( const unsigned long ulIterations );
 
 /*-----------------------------------------------------------*/
 
 /* variables */
-static volatile uint32_t ulCheckpointIterations;
+static volatile uint32_t ulIterations;
 
 /*-----------------------------------------------------------*/
 
@@ -109,7 +109,7 @@ void main_lab( void )
 static void prvCheckpointTask( void *pvParameters )
 {
 TickType_t xNextWakeTime;
-unsigned long ulCheckpointIterations = 0UL;
+unsigned long ulIterations = 0UL;
 
 	/* Remove compiler warning about unused parameter. */
 	( void ) pvParameters;
@@ -119,22 +119,25 @@ unsigned long ulCheckpointIterations = 0UL;
 
 	for( ;; )
 	{
-	    ulCheckpointIterations++;
 		/* Place this task in the blocked state until it is time to run again. */
 		vTaskDelayUntil( &xNextWakeTime,  mainCHECKPOINT_DELAY );
 
-		if(prvRandom(ulCheckpointIterations)) checkpointPowerOff(); // Todo: enter LPM4.5
-		if(ulCheckpointIterations % mainCHECKPOINT_PERIOD == 0) checkpointCommit();
+	    ulIterations++;
+
+		if(ulIterations % mainCHECKPOINT_PERIOD == 0) checkpointCommit();
+		
 		#if( mainUSE_CIO_PRINTF == 1 )
-		printf("%d\n", (int)ulCheckpointIterations);
+		printf("%d\n", (int)ulIterations);
 		#endif
+		
+		if(prvRandom(ulIterations)) checkpointPowerOff(); // Todo: enter LPM4.5
 	}
 }
 /*-----------------------------------------------------------*/
 
-static BaseType_t prvRandom( const unsigned long ulCheckpointIterations )
+static BaseType_t prvRandom( const unsigned long ulIterations )
 {
-	if(ulCheckpointIterations % 24 == 0) return pdTRUE;
+	if(ulIterations % 24 == 0) return pdTRUE;
 	return pdFALSE;
 }
 

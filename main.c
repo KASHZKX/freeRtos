@@ -47,7 +47,7 @@
 #include "task.h"
 #include "semphr.h"
 #include <string.h>
-
+#include <msp430.h>
 /* checkpoint include files*/
 #include "checkpoint.h"
 
@@ -128,13 +128,54 @@ uint8_t g_backupSram[2][CKPT_SRAM_MAX_SIZE] = {0};
 
 /*-----------------------------------------------------------*/
 
+static void debugDelay(void)
+{
+    volatile unsigned long i;
+    for (i = 0; i < 50000UL; i++) {
+        __no_operation();
+    }
+}
+
+static void debugLedInit(void)
+{
+    P1DIR |= BIT0 | BIT1;
+    P1OUT &= ~(BIT0 | BIT1);
+}
+
+static void blinkRed(unsigned int times)
+{
+    unsigned int i;
+    for (i = 0; i < times; i++) {
+        P1OUT |= BIT0;
+        debugDelay();
+        P1OUT &= ~BIT0;
+        debugDelay();
+    }
+}
+
+static void blinkGreen(unsigned int times)
+{
+    unsigned int i;
+    for (i = 0; i < times; i++) {
+        P1OUT |= BIT1;
+        debugDelay();
+        P1OUT &= ~BIT1;
+        debugDelay();
+    }
+}
+
+/*-----------------------------------------------------------*/
+
 int main( void )
 {
 	/* See http://www.FreeRTOS.org/MSP430FR5969_Free_RTOS_Demo.html */
 
 	/* Configure the hardware ready to run the demo. */
 	prvSetupHardware();
+	debugLedInit();
+	blinkGreen(1);
 	checkpointRestore();
+	blinkRed(1);
 	/* The mainCREATE_SIMPLE_BLINKY_DEMO_ONLY setting is described at the top
 	of this file. */
 	#if( mainCREATE_SIMPLE_BLINKY_DEMO_ONLY == 1 )
@@ -177,7 +218,8 @@ void checkpointRestore(){
         checkpointRestoreReg1();
       
 	// This should not be executed
-    __enable_interrupt();	
+    // taskEXIT_CRITICAL();	
+	for(;;);
 }
 
 /*-----------------------------------------------------------*/
@@ -185,7 +227,7 @@ void checkpointRestore(){
 void checkpointCommit(){
     uint8_t next;
 
-    __disable_interrupt();
+    taskENTER_CRITICAL();
 
     next = g_validIndex ^ 1;
 	
@@ -205,12 +247,12 @@ void checkpointCommit(){
     g_ckptMagic = CKPT_MAGIC;
     g_validIndex = next;   /* 一定要最後才切換 */
 
-    __enable_interrupt();
+    taskEXIT_CRITICAL();
 }
 
-void checkpointPowerOff(){
-	return;
-}
+// void checkpointPowerOff(){
+// 	return;
+// }
 
 /*-----------------------------------------------------------*/
 
@@ -244,7 +286,7 @@ void vApplicationStackOverflowHook( TaskHandle_t pxTask, char *pcTaskName )
 
 void vApplicationIdleHook( void )
 {
-    __bis_SR_register( LPM4_bits + GIE );
+   __bis_SR_register( LPM4_bits + GIE );
     __no_operation();
 }
 /*-----------------------------------------------------------*/

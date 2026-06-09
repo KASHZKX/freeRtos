@@ -78,9 +78,6 @@ checkpointRestoreReg0: .asmfunc
     movx.a &g_backupRegs + 56, r14
     movx.a &g_backupRegs + 60, r15
 
-    movx.a &g_backupRegs + 12, r3
-    movx.a &g_backupRegs + 8,  r2
-    bic.w  #0x00F8, r2
     movx.a &g_backupRegs + 4,  r1
 
     ret_addr
@@ -103,9 +100,6 @@ checkpointRestoreReg1: .asmfunc
     movx.a &g_backupRegs + 64 + 56, r14
     movx.a &g_backupRegs + 64 + 60, r15
 
-    movx.a &g_backupRegs + 64 + 12, r3
-    movx.a &g_backupRegs + 64 + 8,  r2
-    bic.w  #0x00F8, r2
     movx.a &g_backupRegs + 64 + 4,  r1
 
     ret_addr
