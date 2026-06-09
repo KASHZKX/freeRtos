@@ -128,41 +128,41 @@ uint8_t g_backupSram[2][CKPT_SRAM_MAX_SIZE] = {0};
 
 /*-----------------------------------------------------------*/
 
-static void debugDelay(void)
-{
-    volatile unsigned long i;
-    for (i = 0; i < 50000UL; i++) {
-        __no_operation();
-    }
-}
+// static void debugDelay(void)
+// {
+//     volatile unsigned long i;
+//     for (i = 0; i < 50000UL; i++) {
+//         __no_operation();
+//     }
+// }
 
-static void debugLedInit(void)
-{
-    P1DIR |= BIT0 | BIT1;
-    P1OUT &= ~(BIT0 | BIT1);
-}
+// static void debugLedInit(void)
+// {
+//     P1DIR |= BIT0 | BIT1;
+//     P1OUT &= ~(BIT0 | BIT1);
+// }
 
-static void blinkRed(unsigned int times)
-{
-    unsigned int i;
-    for (i = 0; i < times; i++) {
-        P1OUT |= BIT0;
-        debugDelay();
-        P1OUT &= ~BIT0;
-        debugDelay();
-    }
-}
+// static void blinkRed(unsigned int times)
+// {
+//     unsigned int i;
+//     for (i = 0; i < times; i++) {
+//         P1OUT |= BIT0;
+//         debugDelay();
+//         P1OUT &= ~BIT0;
+//         debugDelay();
+//     }
+// }
 
-static void blinkGreen(unsigned int times)
-{
-    unsigned int i;
-    for (i = 0; i < times; i++) {
-        P1OUT |= BIT1;
-        debugDelay();
-        P1OUT &= ~BIT1;
-        debugDelay();
-    }
-}
+// static void blinkGreen(unsigned int times)
+// {
+//     unsigned int i;
+//     for (i = 0; i < times; i++) {
+//         P1OUT |= BIT1;
+//         debugDelay();
+//         P1OUT &= ~BIT1;
+//         debugDelay();
+//     }
+// }
 
 /*-----------------------------------------------------------*/
 
@@ -172,10 +172,10 @@ int main( void )
 
 	/* Configure the hardware ready to run the demo. */
 	prvSetupHardware();
-	debugLedInit();
-	blinkGreen(1);
+	// debugLedInit();
+	// blinkGreen(1);
 	checkpointRestore();
-	blinkRed(1);
+	// blinkRed(1);
 	/* The mainCREATE_SIMPLE_BLINKY_DEMO_ONLY setting is described at the top
 	of this file. */
 	#if( mainCREATE_SIMPLE_BLINKY_DEMO_ONLY == 1 )
@@ -199,9 +199,9 @@ void checkpointRestore(){
     if (g_ckptMagic != CKPT_MAGIC) {
         return;                 // 第一次開機，不 restore
     }
-
+	
     __disable_interrupt();
-
+	vPortSetupTimerInterrupt();
     idx = g_validIndex;
 
     memcpy(CKPT_UCHEAP_ADDR, g_backupUcHeap[idx], CKPT_UCHEAP_SIZE);
@@ -211,7 +211,7 @@ void checkpointRestore(){
 	if(sramSize <= CKPT_SRAM_MAX_SIZE){
 		memcpy(&__sram_start, g_backupSram[idx], sramSize);
 	}
-
+	
     if (idx == 0)
         checkpointRestoreReg0();
     else

@@ -54,6 +54,7 @@
 
 #if( mainUSE_CIO_PRINTF == 1 )
 #include <stdio.h>
+#include <stdlib.h>
 #endif
 
 /* Priorities at which the tasks are created. */
@@ -61,6 +62,8 @@
 
 #define mainCHECKPOINT_DELAY	 	( pdMS_TO_TICKS( 200 ) )
 #define mainCHECKPOINT_PERIOD		( 10UL )
+
+#define mainTASK_LED						( 0 )
 /*-----------------------------------------------------------*/
 
 /*
@@ -79,6 +82,12 @@ static BaseType_t prvRandom( const unsigned long ulIterations );
 
 /* variables */
 static volatile uint32_t ulIterations;
+
+#pragma PERSISTENT(g_lastPowerFailIteration)
+unsigned long g_lastPowerFailIteration = 0;
+
+#pragma PERSISTENT(g_powerFailSalt)
+unsigned int g_powerFailSalt = 1;
 
 /*-----------------------------------------------------------*/
 
@@ -128,17 +137,37 @@ unsigned long ulIterations = 0UL;
 		
 		#if( mainUSE_CIO_PRINTF == 1 )
 		printf("%d\n", (int)ulIterations);
+		vParTestToggleLED( mainTASK_LED );
 		#endif
-		
+		// this is for power source removal testing
+		// if (ulIterations == 30) {
+		// 	break;
+		// }
 		if(prvRandom(ulIterations)) checkpointPowerOff(); // Todo: enter LPM4.5
 	}
 }
 /*-----------------------------------------------------------*/
 
-static BaseType_t prvRandom( const unsigned long ulIterations )
+static BaseType_t prvRandom(const unsigned long ulIterations)
 {
-	if(ulIterations % 24 == 0) return pdTRUE;
-	return pdFALSE;
+    unsigned long ulSinceLastPowerFail;
+
+    ulSinceLastPowerFail = ulIterations - g_lastPowerFailIteration;
+
+    /* 避免 stagnation：
+       兩次 power fail 間隔必須大於 checkpoint interval */
+    if (ulSinceLastPowerFail <= mainCHECKPOINT_PERIOD) {
+        return pdFALSE;
+    }
+
+    /* 使用 rand() 隨機觸發，機率約 1/3 */
+    if (((rand() ^ g_powerFailSalt ^ ulIterations) % 3) == 0) {
+        g_lastPowerFailIteration = ulIterations;
+		g_powerFailSalt++;
+        return pdTRUE;
+    }
+
+    return pdFALSE;
 }
 
 /*-----------------------------------------------------------*/
